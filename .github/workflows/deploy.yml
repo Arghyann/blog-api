@@ -22,7 +22,7 @@ jobs:
         run: go test ./...
 
       - name: Build
-        run: go build -o blog .
+        run: go build -o server .
 
       - name: Upload binary
         uses: appleboy/scp-action@v0.1.7
@@ -30,8 +30,8 @@ jobs:
           host: ${{ secrets.SSH_HOST }}
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_PRIVATE_KEY }}
-          source: "blog"
-          target: "/home/${{ secrets.SSH_USER }}/blog"
+          source: "server"
+          target: "/home/${{ secrets.SSH_USER }}/blog-api"
 
       - name: Restart server
         uses: appleboy/ssh-action@v1.2.2
@@ -41,4 +41,4 @@ jobs:
           key: ${{ secrets.SSH_PRIVATE_KEY }}
           script: |
             cd ~/blog-api
-            sudo systemctl --user restart blog-api.service
+            sudo systemctl restart blog-api.service
