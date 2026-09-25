@@ -5,6 +5,11 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
+	"time"
+	"github.com/google/uuid"
+	"github.com/golang-jwt/jwt/v5"
+	"golang.org/x/crypto/bcrypt"
+	"os"
 )
 
 type API struct {
@@ -70,4 +75,106 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 
 	json.NewEncoder(w).Encode(response)
 
+}
+func (a *API) login(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		User     string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		log.Println("Login Error:", err)
+		http.Error(w, "Invalid Request", http.StatusBadRequest)
+		return
+	}
+
+	var passwordHash string
+	var id string
+
+	err = a.db.QueryRow(
+		`SELECT password_hash, id FROM admins WHERE user = ?`,
+		input.User,
+	).Scan(&passwordHash, &id)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+			return
+		}
+
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
+
+	err = bcrypt.CompareHashAndPassword(
+		[]byte(passwordHash),
+		[]byte(input.Password),
+	)
+
+	if err != nil {
+		log.Println("Invalid password")
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	claims := jwt.MapClaims{
+		"user_id": id,
+		"exp":     time.Now().Add(time.Hour).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+
+	jwtSecret := os.Getenv("JWT_SECRET")
+
+	signedToken, err := token.SignedString([]byte(jwtSecret))
+	if err != nil {
+		http.Error(w, "Could not create token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	json.NewEncoder(w).Encode(map[string]string{
+		"token": signedToken,
+	})
+}
+
+
+func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
+	var input struct {
+		Title       string `json:"title"`
+		Slug        string `json:"slug"`
+		Body        string `json:"body"`
+		Tags        string `json:"tags"`
+		Description string `json:"description"`
+	}
+
+	err := json.NewDecoder(r.Body).Decode(&input)
+	if err != nil {
+		log.Println("Invalid body", err)
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	id := uuid.New().String()
+
+	_, err = a.db.Exec(
+		`INSERT INTO posts
+		(id, slug, title, body, tags, description)
+		VALUES (?, ?, ?, ?, ?, ?)`,
+		id,
+		input.Slug,
+		input.Title,
+		input.Body,
+		input.Tags,
+		input.Description,
+	)
+
+	if err != nil {
+		http.Error(w, "Failed to create Post", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
 }
