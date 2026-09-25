@@ -28,10 +28,10 @@ func main() {
 		db: db,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /posts/{slug}", api.getPost)
-	mux.HandleFunc("GET /posts", api.listPosts)
-	mux.Handle("POST /post",authorize(http.HandlerFunc(api.UploadPost)))
-	mux.HandleFunc("POST /login",api.login)
+	mux.HandleFunc("GET /blog-api/posts/{slug}", api.getPost)
+	mux.HandleFunc("GET /blog-api/posts", api.listPosts)
+	mux.Handle("POST /blog-api/post",authorize(http.HandlerFunc(api.UploadPost)))
+	mux.HandleFunc("POST /blog-api/login",api.login)
 	// 4. Start the HTTP server
 	log.Println("Server running on port 8080")
 
