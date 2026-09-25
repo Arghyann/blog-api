@@ -3,13 +3,13 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
+	"golang.org/x/crypto/bcrypt"
 	"log"
 	"net/http"
-	"time"
-	"github.com/google/uuid"
-	"github.com/golang-jwt/jwt/v5"
-	"golang.org/x/crypto/bcrypt"
 	"os"
+	"time"
 )
 
 type API struct {
@@ -78,7 +78,9 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 }
 func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	var input struct {
-		User     string `json:"email"`
+		Username string `json:"username"`
+		User     string `json:"user"`
+		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
 
@@ -89,17 +91,25 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	username := input.Username
+	if username == "" {
+		username = input.User
+	}
+	if username == "" {
+		username = input.Email
+	}
+
 	var passwordHash string
 	var id string
 
 	err = a.db.QueryRow(
 		`SELECT password_hash, id FROM admins WHERE user = ?`,
-		input.User,
+		username,
 	).Scan(&passwordHash, &id)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+			http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 			return
 		}
 
@@ -114,7 +124,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 
 	if err != nil {
 		log.Println("Invalid password")
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		http.Error(w, "Invalid username or password", http.StatusUnauthorized)
 		return
 	}
 
@@ -140,7 +150,6 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-
 func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Title       string `json:"title"`
@@ -154,6 +163,11 @@ func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println("Invalid body", err)
 		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+
+	if input.Title == "" || input.Slug == "" || input.Body == "" {
+		http.Error(w, "title, slug, and body are required", http.StatusBadRequest)
 		return
 	}
 
@@ -172,9 +186,15 @@ func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
+		log.Println("Failed to create post:", err)
 		http.Error(w, "Failed to create Post", http.StatusInternalServerError)
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
+	json.NewEncoder(w).Encode(map[string]string{
+		"id":   id,
+		"slug": input.Slug,
+	})
 }

@@ -24,6 +24,12 @@ func initDb(path string) *sql.DB {
 		tags TEXT,
 		published_at DATETIME DEFAULT CURRENT_TIMESTAMP,
 		description TEXT NOT NULL
+	);
+	
+	CREATE TABLE IF NOT EXISTS admins (
+		id TEXT PRIMARY KEY,
+		user TEXT UNIQUE NOT NULL,
+		password_hash TEXT NOT NULL
 	);`
 	_, err = db.Exec(schema)
 	if err != nil {
