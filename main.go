@@ -35,7 +35,7 @@ func main() {
 	// 4. Start the HTTP server
 	log.Println("Server running on port 8080")
 
-	log.Fatal(http.ListenAndServe(":8080", mux))
+	log.Fatal(http.ListenAndServe(":8081", mux))
 }
 
 func authorize(next http.Handler) http.Handler{
