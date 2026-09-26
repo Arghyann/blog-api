@@ -19,7 +19,7 @@ type API struct {
 }
 
 func (a *API) listPosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Query(`SELECT ID,Title,Slug,Description FROM posts`)
+	rows, err := a.db.Query(`SELECT ID, Title, Slug, Description, COALESCE(tags, ''), COALESCE(published_at, '') FROM posts`)
 	if err != nil {
 		log.Println("listPosts query failed: ", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -29,7 +29,7 @@ func (a *API) listPosts(w http.ResponseWriter, r *http.Request) {
 	posts := []Post{}
 	for rows.Next() {
 		var p Post
-		err := rows.Scan(&p.ID, &p.Title, &p.Slug, &p.Description)
+		err := rows.Scan(&p.ID, &p.Title, &p.Slug, &p.Description, &p.Tags, &p.PublishedAt)
 		if err != nil {
 			log.Println("Error while listingPosts", err)
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -52,10 +52,12 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 	var id string
 	var title string
 	var body string
+	var tags string
+	var publishedAt string
 	err := a.db.QueryRow(
-		`SELECT ID, Title, Body
+		`SELECT ID, Title, Body, COALESCE(tags, ''), COALESCE(published_at, '')
 		 FROM posts 
-		 WHERE Slug = ? `, slug).Scan(&id, &title, &body)
+		 WHERE Slug = ? `, slug).Scan(&id, &title, &body, &tags, &publishedAt)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("Error while reading post", err)
@@ -69,9 +71,11 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 
 	}
 	response := map[string]interface{}{
-		"id":    id,
-		"Title": title,
-		"Body":  body,
+		"id":           id,
+		"title":        title,
+		"body":         body,
+		"tags":         tags,
+		"published_at": publishedAt,
 	}
 	w.Header().Set("Content-Type", "application/json")
 
@@ -204,5 +208,6 @@ func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]string{
 		"id":   id,
 		"slug": input.Slug,
+		"tags": input.Tags,
 	})
 }

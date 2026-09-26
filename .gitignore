@@ -4,5 +4,5 @@
 .env
 blog-api
 server
-
+*.json
 
