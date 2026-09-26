@@ -19,7 +19,7 @@ func initDb(path string) *sql.DB {
 	CREATE TABLE IF NOT EXISTS posts (
 		id TEXT PRIMARY KEY,
 		slug TEXT UNIQUE NOT NULL,
-		title TEXT NOT NULL,
+	title TEXT UNIQUE NOT NULL,
 		body TEXT NOT NULL,
 		tags TEXT,
 		published_at DATETIME DEFAULT CURRENT_TIMESTAMP,

@@ -10,6 +10,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+	"modernc.org/sqlite"
+	"errors"
 )
 
 type API struct {
@@ -186,6 +188,12 @@ func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if err != nil {
+		var sqlError *sqlite.Error
+		if errors.As(err, &sqlError) && sqlError.Code()==2067{
+			log.Println("slug or title taken")
+			http.Error(w,"Title or Slug already Take",http.StatusConflict)
+			return
+		}
 		log.Println("Failed to create post:", err)
 		http.Error(w, "Failed to create Post", http.StatusInternalServerError)
 		return
