@@ -10,6 +10,7 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
+	"strings"
 )
 
 func main() {
@@ -41,6 +42,7 @@ func main() {
 func authorize(next http.Handler) http.Handler{
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
 		tokenString := r.Header.Get("Authorization")
+		tokenString,_=strings.CutPrefix(tokenString,"Bearer ")
 		token,err:=jwt.Parse(tokenString,func(_ *jwt.Token)(interface{},error){
 			return []byte(os.Getenv("JWT_SECRET")),nil
 		})
