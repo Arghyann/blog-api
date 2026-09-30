@@ -11,10 +11,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
 	"strings"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 func main() {
-	//connect to db
 	err := godotenv.Load(".env")
 	if err!=nil{
 		log.Fatal("Couldn't load .env")
@@ -29,15 +29,17 @@ func main() {
 		db: db,
 	}
 	mux := http.NewServeMux()
-	mux.HandleFunc("GET /blog-api/posts/{slug}", api.getPost)
-	mux.HandleFunc("GET /blog-api/posts", api.listPosts)
-	mux.Handle("POST /blog-api/post",authorize(http.HandlerFunc(api.UploadPost)))
-	mux.HandleFunc("POST /blog-api/login",api.login)
+	mux.Handle("GET /blog-api/posts/{slug}", MetricsMiddleware("/blog-api/posts/{slug}", http.HandlerFunc(api.getPost)))
+	mux.Handle("GET /blog-api/posts", MetricsMiddleware("/blog-api/posts", http.HandlerFunc(api.listPosts)))
+	mux.Handle("POST /blog-api/post", MetricsMiddleware("/blog-api/post", authorize(http.HandlerFunc(api.UploadPost))))
+	mux.Handle("POST /blog-api/login", MetricsMiddleware("/blog-api/login", http.HandlerFunc(api.login)))
+	mux.Handle("GET /metrics", promhttp.Handler())
 	// 4. Start the HTTP server
 	log.Println("Server running on port 8080")
 
 	log.Fatal(http.ListenAndServe(":8081", mux))
 }
+
 
 func authorize(next http.Handler) http.Handler{
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request){
