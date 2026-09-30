@@ -33,7 +33,7 @@ func main() {
 	mux.Handle("GET /blog-api/posts", MetricsMiddleware("/blog-api/posts", http.HandlerFunc(api.listPosts)))
 	mux.Handle("POST /blog-api/post", MetricsMiddleware("/blog-api/post", authorize(http.HandlerFunc(api.UploadPost))))
 	mux.Handle("POST /blog-api/login", MetricsMiddleware("/blog-api/login", http.HandlerFunc(api.login)))
-	mux.Handle("GET /metrics", promhttp.Handler())
+	mux.Handle("GET /blog-api/metrics", promhttp.Handler())
 	// 4. Start the HTTP server
 	log.Println("Server running on port 8080")
 
