@@ -43,11 +43,12 @@ func TestFindNote(t *testing.T) {
 	}
 	c := &config{Vault: dir}
 	for arg, want := range map[string]string{
-		"tailscale":                "Tailscale and the networking Rabbithole.md",
-		"Fine tuning":              "Fine tuning.md",
-		"blockchain":               "Blockchain and why.md",
-		"microservice-million-rps": "Why?.md",
-		"load testing a go micro":  "Why?.md",
+		"Tailscale and the networking Rabbithole": "Tailscale and the networking Rabbithole.md",
+		"tailscale and the networking rabbithole": "Tailscale and the networking Rabbithole.md",
+		"Fine tuning":                           "Fine tuning.md",
+		"blockchain":                            "Blockchain and why.md",
+		"microservice-million-rps":              "Why?.md",
+		"Why I Built a Blockchain from Scratch": "Blockchain and why.md",
 	} {
 		if got := filepath.Base(findNote(c, arg)); got != want {
 			t.Errorf("findNote(%q) = %q, want %q", arg, got, want)

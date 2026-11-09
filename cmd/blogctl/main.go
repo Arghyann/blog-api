@@ -4,7 +4,7 @@
 //	blogctl list
 //	blogctl new                 open $EDITOR with a template, then publish
 //	blogctl push <file|name>    publish (or update, if the slug exists) a note, by path or by
-//	                            filename/title/slug found in your vault
+//	                            exact filename/title/slug found in your vault
 //	blogctl edit <slug>         fetch, open in $EDITOR, update on save
 //	blogctl delete <slug>
 //	blogctl image [file]        upload an image (asks for a path if omitted), print its markdown snippet
@@ -388,7 +388,8 @@ func cleanPath(p string) string {
 }
 
 // findNote resolves a push argument to a file. An existing path is used as is;
-// otherwise the vault is searched by filename, front-matter title or slug.
+// otherwise the vault is searched for an exact (case-insensitive) match on
+// filename, front-matter title or slug. No fuzzy matching: push overwrites.
 func findNote(c *config, arg string) string {
 	if p := cleanPath(arg); fileExists(p) {
 		return p
@@ -407,7 +408,7 @@ func findNote(c *config, arg string) string {
 		saveConfig(*c)
 	}
 	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(arg), ".md"))
-	var exact, partial []string
+	var matches []string
 	filepath.WalkDir(c.Vault, func(p string, d os.DirEntry, err error) error {
 		if err != nil {
 			return nil
@@ -428,18 +429,11 @@ func findNote(c *config, arg string) string {
 				title, slug = strings.ToLower(np.Title), strings.ToLower(np.Slug)
 			}
 		}
-		switch {
-		case name == want || title == want || slug == want:
-			exact = append(exact, p)
-		case strings.Contains(name, want) || (title != "" && strings.Contains(title, want)):
-			partial = append(partial, p)
+		if name == want || (title != "" && title == want) || (slug != "" && slug == want) {
+			matches = append(matches, p)
 		}
 		return nil
 	})
-	matches := exact
-	if len(matches) == 0 {
-		matches = partial
-	}
 	switch len(matches) {
 	case 0:
 		die("no note matching %q in %s", arg, c.Vault)
