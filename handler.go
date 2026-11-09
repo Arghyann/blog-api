@@ -1,6 +1,7 @@
 package main
 
 import (
+	"github.com/minio/minio-go/v7"
 	"database/sql"
 	"encoding/json"
 	"github.com/golang-jwt/jwt/v5"
@@ -16,6 +17,7 @@ import (
 
 type API struct {
 	db *sql.DB
+	r2 *minio.Client
 }
 
 func (a *API) listPosts(w http.ResponseWriter, r *http.Request) {
@@ -54,10 +56,11 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 	var body string
 	var tags string
 	var publishedAt string
+	var description string
 	err := a.db.QueryRow(
-		`SELECT ID, Title, Body, COALESCE(tags, ''), COALESCE(published_at, '')
+		`SELECT ID, Title, Body, COALESCE(tags, ''), COALESCE(published_at, ''), COALESCE(description, '')
 		 FROM posts 
-		 WHERE Slug = ? `, slug).Scan(&id, &title, &body, &tags, &publishedAt)
+		 WHERE Slug = ? `, slug).Scan(&id, &title, &body, &tags, &publishedAt, &description)
 	if err != nil {
 		if err == sql.ErrNoRows {
 			log.Println("Error while reading post", err)
@@ -72,6 +75,8 @@ func (a *API) getPost(w http.ResponseWriter, r *http.Request) {
 	}
 	response := map[string]interface{}{
 		"id":           id,
+		"slug":         slug,
+		"description":  description,
 		"title":        title,
 		"body":         body,
 		"tags":         tags,
@@ -210,4 +215,65 @@ func (a *API) UploadPost(w http.ResponseWriter, r *http.Request) {
 		"slug": input.Slug,
 		"tags": input.Tags,
 	})
+}
+
+func (a *API) UpdatePost(w http.ResponseWriter, r *http.Request) {
+	slug := r.PathValue("slug")
+	var input struct {
+		Title       string `json:"title"`
+		Slug        string `json:"slug"`
+		Body        string `json:"body"`
+		Tags        string `json:"tags"`
+		Description string `json:"description"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		http.Error(w, "Bad Request", http.StatusBadRequest)
+		return
+	}
+	if input.Title == "" || input.Body == "" {
+		http.Error(w, "title and body are required", http.StatusBadRequest)
+		return
+	}
+	// slug in body is optional; lets you rename a post
+	newSlug := input.Slug
+	if newSlug == "" {
+		newSlug = slug
+	}
+
+	res, err := a.db.Exec(
+		`UPDATE posts
+		 SET slug = ?, title = ?, body = ?, tags = ?, description = ?
+		 WHERE slug = ?`,
+		newSlug, input.Title, input.Body, input.Tags, input.Description, slug,
+	)
+	if err != nil {
+		var sqlError *sqlite.Error
+		if errors.As(err, &sqlError) && sqlError.Code() == 2067 {
+			http.Error(w, "Title or Slug already taken", http.StatusConflict)
+			return
+		}
+		log.Println("Failed to update post:", err)
+		http.Error(w, "Failed to update Post", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Post Not Found", http.StatusNotFound)
+		return
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"slug": newSlug})
+}
+
+func (a *API) DeletePost(w http.ResponseWriter, r *http.Request) {
+	res, err := a.db.Exec(`DELETE FROM posts WHERE slug = ?`, r.PathValue("slug"))
+	if err != nil {
+		log.Println("Failed to delete post:", err)
+		http.Error(w, "Failed to delete Post", http.StatusInternalServerError)
+		return
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		http.Error(w, "Post Not Found", http.StatusNotFound)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
 }

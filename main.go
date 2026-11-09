@@ -27,11 +27,15 @@ func main() {
 	}
 	api := &API{
 		db: db,
+		r2: initR2(),
 	}
 	mux := http.NewServeMux()
 	mux.Handle("GET /blog-api/posts/{slug}", MetricsMiddleware("/blog-api/posts/{slug}", http.HandlerFunc(api.getPost)))
 	mux.Handle("GET /blog-api/posts", MetricsMiddleware("/blog-api/posts", http.HandlerFunc(api.listPosts)))
 	mux.Handle("POST /blog-api/post", MetricsMiddleware("/blog-api/post", authorize(http.HandlerFunc(api.UploadPost))))
+	mux.Handle("PUT /blog-api/posts/{slug}", MetricsMiddleware("/blog-api/posts/{slug}", authorize(http.HandlerFunc(api.UpdatePost))))
+	mux.Handle("DELETE /blog-api/posts/{slug}", MetricsMiddleware("/blog-api/posts/{slug}", authorize(http.HandlerFunc(api.DeletePost))))
+	mux.Handle("POST /blog-api/images", MetricsMiddleware("/blog-api/images", authorize(http.HandlerFunc(api.UploadImage))))
 	mux.Handle("POST /blog-api/login", MetricsMiddleware("/blog-api/login", http.HandlerFunc(api.login)))
 	mux.Handle("GET /blog-api/metrics", promhttp.Handler())
 	// 4. Start the HTTP server
