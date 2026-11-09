@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 )
 
@@ -31,6 +32,25 @@ func TestCleanPath(t *testing.T) {
 	for in, want := range cases {
 		if got := cleanPath(in); got != want {
 			t.Errorf("cleanPath(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestFindNote(t *testing.T) {
+	dir := os.Getenv("VAULT")
+	if dir == "" {
+		t.Skip("set VAULT")
+	}
+	c := &config{Vault: dir}
+	for arg, want := range map[string]string{
+		"tailscale":                "Tailscale and the networking Rabbithole.md",
+		"Fine tuning":              "Fine tuning.md",
+		"blockchain":               "Blockchain and why.md",
+		"microservice-million-rps": "Why?.md",
+		"load testing a go micro":  "Why?.md",
+	} {
+		if got := filepath.Base(findNote(c, arg)); got != want {
+			t.Errorf("findNote(%q) = %q, want %q", arg, got, want)
 		}
 	}
 }

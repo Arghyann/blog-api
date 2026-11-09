@@ -3,7 +3,8 @@
 //	blogctl login
 //	blogctl list
 //	blogctl new                 open $EDITOR with a template, then publish
-//	blogctl push <file.md>      publish (or update, if the slug exists) a file
+//	blogctl push <file|name>    publish (or update, if the slug exists) a note, by path or by
+//	                            filename/title/slug found in your vault
 //	blogctl edit <slug>         fetch, open in $EDITOR, update on save
 //	blogctl delete <slug>
 //	blogctl image [file]        upload an image (asks for a path if omitted), print its markdown snippet
@@ -40,6 +41,7 @@ const defaultURL = "https://aryanssh.duckdns.org/blog-api"
 type config struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
+	Vault string `json:"vault,omitempty"`
 }
 
 type post struct {
@@ -255,10 +257,12 @@ func main() {
 		if len(args) < 1 {
 			die("usage: blogctl push <file.md>")
 		}
-		b, err := os.ReadFile(args[0])
+		path := findNote(&c, args[0])
+		b, err := os.ReadFile(path)
 		if err != nil {
 			die("%v", err)
 		}
+		fmt.Println("pushing", path)
 		publish(c, string(b), true)
 
 	case "edit":
@@ -381,4 +385,76 @@ func cleanPath(p string) string {
 		}
 	}
 	return p
+}
+
+// findNote resolves a push argument to a file. An existing path is used as is;
+// otherwise the vault is searched by filename, front-matter title or slug.
+func findNote(c *config, arg string) string {
+	if p := cleanPath(arg); fileExists(p) {
+		return p
+	}
+	if c.Vault == "" {
+		home, _ := os.UserHomeDir()
+		def := filepath.Join(home, "Documents", "Obsidian Vault")
+		v := prompt(fmt.Sprintf("Vault folder [%s]: ", def))
+		if v == "" {
+			v = def
+		}
+		c.Vault = cleanPath(v)
+		if st, err := os.Stat(c.Vault); err != nil || !st.IsDir() {
+			die("%s is not a folder", c.Vault)
+		}
+		saveConfig(*c)
+	}
+	want := strings.ToLower(strings.TrimSuffix(strings.TrimSpace(arg), ".md"))
+	var exact, partial []string
+	filepath.WalkDir(c.Vault, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return nil
+		}
+		if d.IsDir() {
+			if p != c.Vault && strings.HasPrefix(d.Name(), ".") {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+		if !strings.HasSuffix(p, ".md") {
+			return nil
+		}
+		name := strings.ToLower(strings.TrimSuffix(d.Name(), ".md"))
+		var title, slug string
+		if b, err := os.ReadFile(p); err == nil {
+			if np, _ := parsePost(string(b)); np.Slug != "" {
+				title, slug = strings.ToLower(np.Title), strings.ToLower(np.Slug)
+			}
+		}
+		switch {
+		case name == want || title == want || slug == want:
+			exact = append(exact, p)
+		case strings.Contains(name, want) || (title != "" && strings.Contains(title, want)):
+			partial = append(partial, p)
+		}
+		return nil
+	})
+	matches := exact
+	if len(matches) == 0 {
+		matches = partial
+	}
+	switch len(matches) {
+	case 0:
+		die("no note matching %q in %s", arg, c.Vault)
+	case 1:
+		return matches[0]
+	}
+	fmt.Fprintf(os.Stderr, "%q matches several notes:\n", arg)
+	for _, m := range matches {
+		fmt.Fprintln(os.Stderr, "  ", m)
+	}
+	os.Exit(1)
+	return ""
+}
+
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
