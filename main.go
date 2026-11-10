@@ -11,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/golang-jwt/jwt/v5"
 	"strings"
+	"os/exec"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -23,6 +24,10 @@ func main() {
 	defer db.Close()
 	if len(os.Args) > 1 && os.Args[1] == "create-user" {
 		createUser(db)
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "change-password" {
+		changePassword(db)
 		return
 	}
 	api := &API{
@@ -87,4 +92,63 @@ func createUser(db *sql.DB) {
 		log.Fatal(err)
 	}
 	fmt.Println("User created")
+}
+
+// readSecret prompts for input without echoing it to the terminal.
+func readSecret(label string) string {
+	fmt.Print(label)
+	stty := func(arg string) {
+		cmd := exec.Command("stty", arg)
+		cmd.Stdin = os.Stdin
+		cmd.Run()
+	}
+	stty("-echo")
+	defer func() { stty("echo"); fmt.Println() }()
+	return readLine()
+}
+
+// readLine reads one line from stdin a byte at a time, so it never swallows
+// input meant for a later prompt (or for fmt.Scanln).
+func readLine() string {
+	var sb strings.Builder
+	b := make([]byte, 1)
+	for {
+		n, err := os.Stdin.Read(b)
+		if n == 1 {
+			if b[0] == '\n' {
+				break
+			}
+			sb.WriteByte(b[0])
+		}
+		if err != nil {
+			break
+		}
+	}
+	return strings.TrimSpace(sb.String())
+}
+
+// changePassword updates an existing admin's password: ./server change-password
+func changePassword(db *sql.DB) {
+	fmt.Print("Username: ")
+	var username string
+	fmt.Scanln(&username)
+	var exists bool
+	if err := db.QueryRow(`SELECT 1 FROM admins WHERE user = ?`, username).Scan(&exists); err != nil {
+		log.Fatal("No such user: ", username)
+	}
+	password := readSecret("New password: ")
+	if len(password) < 12 {
+		log.Fatal("Password must be at least 12 characters")
+	}
+	if readSecret("Confirm password: ") != password {
+		log.Fatal("Passwords do not match")
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		log.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE admins SET password_hash = ? WHERE user = ?`, hash, username); err != nil {
+		log.Fatal(err)
+	}
+	fmt.Println("Password updated for", username)
 }
