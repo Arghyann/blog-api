@@ -21,7 +21,7 @@ type API struct {
 }
 
 func (a *API) listPosts(w http.ResponseWriter, r *http.Request) {
-	rows, err := a.db.Query(`SELECT ID, Title, Slug, Description, COALESCE(tags, ''), COALESCE(published_at, '') FROM posts`)
+	rows, err := a.db.Query(`SELECT ID, Title, Slug, Description, COALESCE(tags, ''), COALESCE(published_at, '') FROM posts ORDER BY published_at DESC`)
 	if err != nil {
 		log.Println("listPosts query failed: ", err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -93,6 +93,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 		User     string `json:"user"`
 		Email    string `json:"email"`
 		Password string `json:"password"`
+		Days     int    `json:"days"` // optional: token lifetime in days (default 1 hour, max maxLoginDays)
 	}
 
 	err := json.NewDecoder(r.Body).Decode(&input)
@@ -141,7 +142,7 @@ func (a *API) login(w http.ResponseWriter, r *http.Request) {
 
 	claims := jwt.MapClaims{
 		"user_id": id,
-		"exp":     time.Now().Add(time.Hour).Unix(),
+		"exp":     time.Now().Add(tokenTTL(input.Days)).Unix(),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -276,4 +277,18 @@ func (a *API) DeletePost(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+const maxLoginDays = 30
+
+// tokenTTL is the lifetime of a login token: 1 hour unless the client asks for
+// a number of days, capped at maxLoginDays. The caller has already proven the password.
+func tokenTTL(days int) time.Duration {
+	if days <= 0 {
+		return time.Hour
+	}
+	if days > maxLoginDays {
+		days = maxLoginDays
+	}
+	return time.Duration(days) * 24 * time.Hour
 }

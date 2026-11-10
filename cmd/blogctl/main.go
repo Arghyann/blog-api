@@ -1,6 +1,6 @@
 // blogctl: a small CLI for writing and editing posts on the blog API.
 //
-//	blogctl login
+//	blogctl login [--days N]    log in; the token is saved in ~/.config/blogctl/.env (default 30 days)
 //	blogctl list
 //	blogctl new                 open $EDITOR with a template, then publish
 //	blogctl push <file|name>    publish (or update, if the slug exists) a note, by path or by
@@ -23,6 +23,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -32,9 +33,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
+
+const defaultLoginDays = 30 // the server caps this
 
 const defaultURL = "https://aryanssh.duckdns.org/blog-api"
 
@@ -42,6 +46,9 @@ type config struct {
 	URL   string `json:"url"`
 	Token string `json:"token"`
 	Vault string `json:"vault,omitempty"`
+
+	// what is actually in the file, so an environment override is never written back
+	fileURL, fileToken string
 }
 
 type post struct {
@@ -62,28 +69,70 @@ tags:
 
 `
 
-func configPath() string {
+// Settings live in ~/.config/blogctl/.env (KEY=VALUE, mode 600):
+//
+//	BLOG_TOKEN=<jwt>        saved by `blogctl login`
+//	BLOG_API_URL=...        optional, defaults to the production API
+//	BLOG_VAULT=...          Obsidian vault folder, asked for once
+//
+// BLOG_TOKEN and BLOG_API_URL in the real environment override the file.
+func configDir() string {
 	dir, _ := os.UserConfigDir()
-	return filepath.Join(dir, "blogctl", "config.json")
+	return filepath.Join(dir, "blogctl")
+}
+
+func envPath() string { return filepath.Join(configDir(), ".env") }
+
+func parseEnv(text string) map[string]string {
+	m := map[string]string{}
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if k, v, ok := strings.Cut(line, "="); ok {
+			m[strings.TrimSpace(k)] = strings.Trim(strings.TrimSpace(v), `"'`)
+		}
+	}
+	return m
 }
 
 func loadConfig() config {
 	c := config{URL: defaultURL}
-	if b, err := os.ReadFile(configPath()); err == nil {
-		json.Unmarshal(b, &c)
+	if b, err := os.ReadFile(envPath()); err == nil {
+		m := parseEnv(string(b))
+		if v := m["BLOG_API_URL"]; v != "" {
+			c.URL = v
+		}
+		c.Token, c.Vault = m["BLOG_TOKEN"], m["BLOG_VAULT"]
+	} else if b, err := os.ReadFile(filepath.Join(configDir(), "config.json")); err == nil {
+		json.Unmarshal(b, &c) // older versions stored JSON
 	}
+	c.fileURL, c.fileToken = c.URL, c.Token
 	if v := os.Getenv("BLOG_API_URL"); v != "" {
 		c.URL = v
+	}
+	if v := os.Getenv("BLOG_TOKEN"); v != "" {
+		c.Token = v
 	}
 	c.URL = strings.TrimRight(c.URL, "/")
 	return c
 }
 
 func saveConfig(c config) {
-	p := configPath()
-	os.MkdirAll(filepath.Dir(p), 0o700)
-	b, _ := json.MarshalIndent(c, "", "  ")
-	if err := os.WriteFile(p, b, 0o600); err != nil {
+	var sb strings.Builder
+	sb.WriteString("# blogctl settings, written by `blogctl login`. Keep private.\n")
+	if u := strings.TrimRight(c.fileURL, "/"); u != "" && u != defaultURL {
+		fmt.Fprintf(&sb, "BLOG_API_URL=%s\n", u)
+	}
+	if c.fileToken != "" {
+		fmt.Fprintf(&sb, "BLOG_TOKEN=%s\n", c.fileToken)
+	}
+	if c.Vault != "" {
+		fmt.Fprintf(&sb, "BLOG_VAULT=%s\n", c.Vault)
+	}
+	os.MkdirAll(configDir(), 0o700)
+	if err := os.WriteFile(envPath(), []byte(sb.String()), 0o600); err != nil {
 		die("saving config: %v", err)
 	}
 }
@@ -112,7 +161,7 @@ func (c config) do(method, path, contentType string, body io.Reader) []byte {
 	defer resp.Body.Close()
 	data, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode == http.StatusUnauthorized {
-		die("unauthorized: run `blogctl login` (token expires after 1 hour)")
+		die("unauthorized: your saved token has expired or is invalid; run `blogctl login`")
 	}
 	if resp.StatusCode >= 300 {
 		die("%s %s: %s %s", method, path, resp.Status, strings.TrimSpace(string(data)))
@@ -231,17 +280,32 @@ func main() {
 
 	switch os.Args[1] {
 	case "login":
+		days := defaultLoginDays
+		for i := 0; i < len(args); i++ {
+			if args[i] == "--days" && i+1 < len(args) {
+				n, err := strconv.Atoi(args[i+1])
+				if err != nil || n < 1 {
+					die("--days needs a positive number")
+				}
+				days = n
+				i++
+			}
+		}
 		user := prompt("Username: ")
 		pass := promptSecret("Password: ")
-		out := c.jsonReq("POST", "/login", map[string]string{"username": user, "password": pass})
+		out := c.jsonReq("POST", "/login", map[string]any{"username": user, "password": pass, "days": days})
 		var r struct{ Token string }
 		json.Unmarshal(out, &r)
 		if r.Token == "" {
 			die("no token in response")
 		}
-		c.Token = r.Token
+		c.Token, c.fileToken = r.Token, r.Token
 		saveConfig(c)
-		fmt.Println("logged in (token valid for 1 hour)")
+		if exp, err := tokenExpiry(r.Token); err == nil {
+			fmt.Printf("logged in, token saved to %s (expires %s)\n", envPath(), exp.Format("2006-01-02 15:04"))
+		} else {
+			fmt.Println("logged in, token saved to", envPath())
+		}
 
 	case "list":
 		var posts []post
@@ -451,4 +515,24 @@ func findNote(c *config, arg string) string {
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
 	return err == nil && !st.IsDir()
+}
+
+// tokenExpiry reads the exp claim from a JWT without verifying it (the server
+// verifies); it only exists to tell you when the saved token runs out.
+func tokenExpiry(tok string) (time.Time, error) {
+	parts := strings.Split(tok, ".")
+	if len(parts) != 3 {
+		return time.Time{}, fmt.Errorf("not a JWT")
+	}
+	payload, err := base64.RawURLEncoding.DecodeString(parts[1])
+	if err != nil {
+		return time.Time{}, fmt.Errorf("bad encoding")
+	}
+	var claims struct {
+		Exp int64 `json:"exp"`
+	}
+	if err := json.Unmarshal(payload, &claims); err != nil || claims.Exp == 0 {
+		return time.Time{}, fmt.Errorf("no expiry in token")
+	}
+	return time.Unix(claims.Exp, 0), nil
 }
